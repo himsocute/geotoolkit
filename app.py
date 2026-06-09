@@ -7,18 +7,72 @@ from shapely.validation import make_valid
 import os
 import shutil
 import tempfile
-import time
 import warnings
 
 # ==========================================
-# ตั้งค่าหน้าเว็บ
+# 1. ตั้งค่าหน้าเว็บ และฝัง Custom CSS
 # ==========================================
-st.set_page_config(page_title="GeoSpatial Toolkit", page_icon="🌍", layout="wide")
-st.title("🌍 GeoSpatial Toolkit (Web App)")
-st.markdown("เครื่องมือประมวลผลข้อมูลเชิงพื้นที่: ตัดไฟล์ DXF และแยกไฟล์ DEM (XYZ)")
+st.set_page_config(page_title="GeoSpatial Toolkit", page_icon="🌍", layout="centered")
+
+# ฝัง CSS เพื่อแต่งหน้าตาให้เหมือน Replit (Dark/Green)
+st.markdown("""
+    <style>
+    /* พื้นหลังหลักและตัวอักษร */
+    .stApp {
+        background-color: #0b0f19;
+        color: #f8fafc;
+    }
+    /* สีหัวข้อต่างๆ */
+    h1, h2, h3 {
+        color: #10b981 !important;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    /* กรอบ Uploader */
+    [data-testid="stFileUploadDropzone"] {
+        background-color: #1e293b !important;
+        border: 1.5px dashed #475569 !important;
+        border-radius: 12px !important;
+        padding: 20px !important;
+    }
+    [data-testid="stFileUploadDropzone"]:hover {
+        border-color: #10b981 !important;
+        background-color: #0f172a !important;
+    }
+    /* ปุ่ม Primary (ปุ่ม Start) */
+    .stButton>button[kind="primary"] {
+        background-color: #10b981;
+        color: white;
+        border-radius: 8px;
+        border: none;
+        padding: 1rem 2rem;
+        font-weight: bold;
+        width: 100%;
+        transition: all 0.3s ease;
+    }
+    .stButton>button[kind="primary"]:hover {
+        background-color: #059669;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+    }
+    /* กรอบตัวเลือก Radio / Selectbox */
+    .stSelectbox, .stRadio {
+        background-color: #111827;
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid #1f2937;
+    }
+    /* แถบแจ้งเตือน */
+    .stAlert {
+        border-radius: 8px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("🌍 GeoSpatial Toolkit")
+st.markdown("Precision data processing for GIS engineers. Clip DXF drawings and split DEM point clouds by shapefile boundaries.")
+st.markdown("---")
 
 # ==========================================
-# ฟังก์ชันตรรกะหลัก (Core Logic) ของ DXF
+# 2. ฟังก์ชันตรรกะหลัก (DXF Logic)
 # ==========================================
 def entity_to_2d_shapely(entity):
     t = entity.dxftype()
@@ -86,55 +140,59 @@ def safe_filename(name):
     return "".join(c if c.isalnum() or c in "._-" else "_" for c in str(name)).strip("_") or "unnamed"
 
 # ==========================================
-# ส่วน UI แบ่งเป็น 2 แท็บ
+# 3. สร้างระบบ TAB แบบ Modern
 # ==========================================
-tab1, tab2 = st.tabs(["✂️ DXF Clipper (3D Z)", "⛰️ DEM → TXT Splitter"])
+tab_dxf, tab_dem = st.tabs(["✂️ DXF CLIPPER", "⛰️ DEM SPLITTER"])
 
 # ------------------------------------------
-# TAB 1: DXF Clipper
+# หน้า DXF CLIPPER
 # ------------------------------------------
-with tab1:
-    st.header("เครื่องมือตัดไฟล์ DXF ด้วย Shapefile")
+with tab_dxf:
+    st.subheader("1. Upload Files (อัปโหลดไฟล์)")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        dxf_file = st.file_uploader("📂 อัปโหลดไฟล์ DXF", type=['dxf'])
-    with col2:
-        st.info("💡 Shapefile ต้องอัปโหลดรวมกันหลายไฟล์ (เช่น .shp, .shx, .dbf, .prj)")
-        shp_files = st.file_uploader("📂 อัปโหลดกลุ่มไฟล์ Shapefile", accept_multiple_files=True)
+    col_dxf, col_shp = st.columns(2)
+    with col_dxf:
+        st.caption("DXF Drawing")
+        dxf_file = st.file_uploader("Click to select DXF file (.dxf only)", type=['dxf'], key="dxf_up")
+    with col_shp:
+        st.caption("Shapefile Boundary Group")
+        shp_files = st.file_uploader("Click to select multiple files (.shp, .shx, .dbf, .prj)", accept_multiple_files=True, key="shp_up")
+
+    st.markdown("---")
+    st.subheader("2. Configure & Run (ตั้งค่าและประมวลผล)")
 
     if shp_files:
-        # สร้างโฟลเดอร์จำลองเพื่อเก็บ Shapefile ชั่วคราวให้ Geopandas อ่านได้
         temp_shp_dir = tempfile.mkdtemp()
         shp_path = None
         for f in shp_files:
             file_path = os.path.join(temp_shp_dir, f.name)
-            with open(file_path, "wb") as t:
-                t.write(f.read())
-            if f.name.lower().endswith(".shp"):
-                shp_path = file_path
+            with open(file_path, "wb") as t: t.write(f.read())
+            if f.name.lower().endswith(".shp"): shp_path = file_path
         
         if shp_path:
             try:
                 gdf = gpd.read_file(shp_path)
                 columns = [c for c in gdf.columns if c.lower() != 'geometry']
                 
-                col3, col4 = st.columns(2)
-                with col3:
-                    selected_col = st.selectbox("📌 เลือกคอลัมน์อ้างอิง (Index):", columns)
-                with col4:
-                    mode = st.radio("⚙️ โหมดการทำงาน:", ["individual (ราย Polygon)", "group (รวมกลุ่ม)"])
+                selected_col = st.selectbox("Reference Column (คอลัมน์อ้างอิง)", columns)
                 
-                if st.button("🚀 เริ่มตัดไฟล์ DXF", type="primary") and dxf_file:
-                    with st.spinner("กำลังประมวลผล กรุณารอสักครู่..."):
-                        # บันทึก DXF ชั่วคราว
+                # ตัวเลือก Radio แบบใหม่
+                mode = st.radio(
+                    "Output Mode (รูปแบบผลลัพธ์)", 
+                    [
+                        "🟢 Individual Polygons (One output file per polygon feature)", 
+                        "⚪ Group by Column Value (Merge polygons with the same column value)"
+                    ]
+                )
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                if st.button("▶ START CLIPPING", type="primary") and dxf_file:
+                    with st.spinner("⏳ Processing... Please wait"):
                         temp_dxf_path = os.path.join(temp_shp_dir, dxf_file.name)
-                        with open(temp_dxf_path, "wb") as f:
-                            f.write(dxf_file.read())
-                            
+                        with open(temp_dxf_path, "wb") as f: f.write(dxf_file.read())
                         output_dir = tempfile.mkdtemp()
                         
-                        # กระบวนการตัด (จำลองจาก Logic เดิม)
                         doc = ezdxf.readfile(temp_dxf_path)
                         out_ver = "R2010" if doc.dxfversion <= "AC1009" else doc.dxfversion
                         msp = doc.modelspace()
@@ -144,12 +202,12 @@ with tab1:
                             if geom2d and not geom2d.is_empty:
                                 entity_list.append((entity, geom2d, get_vertex_z_list(entity)))
                         
-                        mode_clean = "individual" if "individual" in mode else "group"
-                        items = list(gdf.iterrows()) if mode_clean == "individual" else list(gdf.groupby(selected_col))
+                        is_individual = "Individual" in mode
+                        items = list(gdf.iterrows()) if is_individual else list(gdf.groupby(selected_col))
                         
                         progress_bar = st.progress(0)
                         for i, item in enumerate(items, 1):
-                            if mode_clean == "individual":
+                            if is_individual:
                                 clip_poly = item[1].geometry
                                 idx_val = str(item[1][selected_col]).strip()
                             else:
@@ -169,49 +227,43 @@ with tab1:
                                 new_doc.saveas(out_path)
                             progress_bar.progress(int((i / len(items)) * 100))
                             
-                        # สร้างไฟล์ ZIP ให้ผู้ใช้ดาวน์โหลด
                         zip_path = shutil.make_archive(tempfile.mkdtemp() + "/dxf_output", 'zip', output_dir)
                         with open(zip_path, "rb") as fp:
-                            st.success("✅ ตัดไฟล์เสร็จสมบูรณ์!")
-                            st.download_button(
-                                label="⬇️ ดาวน์โหลดผลลัพธ์ (.zip)",
-                                data=fp,
-                                file_name="dxf_clipped_results.zip",
-                                mime="application/zip"
-                            )
+                            st.success("✅ Process Completed Successfully!")
+                            st.download_button(label="⬇️ Download Results (.zip)", data=fp, file_name="dxf_clipped_results.zip", mime="application/zip")
             except Exception as e:
-                st.error(f"เกิดข้อผิดพลาดในการอ่าน Shapefile: {e}")
+                st.error(f"Error reading shapefile: {e}")
+    else:
+        st.info("⚠️ Please upload a Shapefile group to unlock configuration options.")
 
 # ------------------------------------------
-# TAB 2: DEM Splitter
+# หน้า DEM SPLITTER
 # ------------------------------------------
-with tab2:
-    st.header("เครื่องมือตัดไฟล์ DEM (XYZ) ตาม Shapefile")
-    
-    xyz_files = st.file_uploader("📂 อัปโหลดไฟล์ XYZ (เลือกได้หลายไฟล์)", type=['xyz', 'txt'], accept_multiple_files=True)
-    st.info("💡 Shapefile ต้องอัปโหลดรวมกันหลายไฟล์ (เช่น .shp, .shx, .dbf, .prj)")
-    shp_files_dem = st.file_uploader("📂 อัปโหลดกลุ่มไฟล์ Shapefile (สำหรับ DEM)", accept_multiple_files=True, key="dem_shp")
+with tab_dem:
+    st.subheader("1. Upload Files (อัปโหลดไฟล์)")
+    xyz_files = st.file_uploader("Click to select XYZ/TXT files (Multiple allowed)", type=['xyz', 'txt'], accept_multiple_files=True)
+    shp_files_dem = st.file_uploader("Click to select Shapefile group (.shp, .shx, .dbf, .prj)", accept_multiple_files=True, key="dem_shp")
+
+    st.markdown("---")
+    st.subheader("2. Configure & Run (ตั้งค่าและประมวลผล)")
 
     if shp_files_dem and xyz_files:
         temp_shp_dir = tempfile.mkdtemp()
         shp_path = None
         for f in shp_files_dem:
             file_path = os.path.join(temp_shp_dir, f.name)
-            with open(file_path, "wb") as t:
-                t.write(f.read())
-            if f.name.lower().endswith(".shp"):
-                shp_path = file_path
+            with open(file_path, "wb") as t: t.write(f.read())
+            if f.name.lower().endswith(".shp"): shp_path = file_path
                 
         if shp_path:
             gdf = gpd.read_file(shp_path)
             columns = [c for c in gdf.columns if c.lower() != 'geometry']
-            selected_col_dem = st.selectbox("📌 เลือก ID column:", columns, key="dem_col")
+            selected_col_dem = st.selectbox("Reference Column (คอลัมน์อ้างอิง)", columns, key="dem_col")
             
-            if st.button("🚀 เริ่มแยกไฟล์ XYZ", type="primary"):
-                with st.spinner("กำลังประมวลผลจุด (Point Cloud) กรุณารอสักครู่..."):
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("▶ START SPLITTING", type="primary"):
+                with st.spinner("⏳ Processing Point Clouds... Please wait"):
                     output_dir = tempfile.mkdtemp()
-                    
-                    # เตรียม Shapefile
                     clip_gdf = gdf.copy()
                     clip_gdf["_poly_id"] = clip_gdf[selected_col_dem].astype(str).str.strip().str.replace(r'[\s/\\:*?"<>|]', "_", regex=True)
                     minx, miny, maxx, maxy = clip_gdf.total_bounds
@@ -222,12 +274,10 @@ with tab2:
                     
                     for file_idx, xyz_file in enumerate(xyz_files):
                         fname = os.path.splitext(xyz_file.name)[0]
-                        progress_text.text(f"กำลังประมวลผลไฟล์: {xyz_file.name}")
-                        
+                        progress_text.text(f"Processing: {xyz_file.name}")
                         sub_dir = os.path.join(output_dir, fname)
                         os.makedirs(sub_dir, exist_ok=True)
                         
-                        # อ่านไฟล์ XYZ จากหน่วยความจำ
                         df = pd.read_csv(xyz_file, sep=r'\s+', header=None, names=['x', 'y', 'z'], dtype={'x': 'float64', 'y': 'float64', 'z': 'float32'})
                         gdf_pts = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df['x'], df['y']), crs=clip_gdf.crs)
                         
@@ -241,21 +291,14 @@ with tab2:
                             out_path = os.path.join(sub_dir, f"{poly_id}.xyz")
                             sub = group[['x', 'y', 'z']]
                             lines = sub['x'].astype(str) + " " + sub['y'].astype(str) + " " + sub['z'].astype(str)
-                            with open(out_path, "w") as fout:
-                                fout.write("\n".join(lines) + "\n")
+                            with open(out_path, "w") as fout: fout.write("\n".join(lines) + "\n")
                                 
                         progress_bar.progress(int(((file_idx + 1) / total_files) * 100))
                         
-                    # สร้างไฟล์ ZIP
-                    progress_text.text("กำลังบีบอัดไฟล์ผลลัพธ์...")
                     zip_path = shutil.make_archive(tempfile.mkdtemp() + "/dem_output", 'zip', output_dir)
-                    
                     with open(zip_path, "rb") as fp:
-                        st.success("✅ ประมวลผลและแยกไฟล์เสร็จสมบูรณ์!")
+                        st.success("✅ Process Completed Successfully!")
                         progress_text.empty()
-                        st.download_button(
-                            label="⬇️ ดาวน์โหลดผลลัพธ์ทั้งหมด (.zip)",
-                            data=fp,
-                            file_name="xyz_split_results.zip",
-                            mime="application/zip"
-                        )
+                        st.download_button(label="⬇️ Download Results (.zip)", data=fp, file_name="xyz_split_results.zip", mime="application/zip")
+    else:
+        st.info("⚠️ Please upload both XYZ files and a Shapefile group to unlock configuration options.")
